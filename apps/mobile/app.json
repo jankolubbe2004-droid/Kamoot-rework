@@ -52,6 +52,13 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow RoamFree to use your location for activity recording and navigation."
         }
+      ],
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.roamfree.app",
+          "enableGooglePay": true
+        }
       ]
     ],
     "experiments": {
