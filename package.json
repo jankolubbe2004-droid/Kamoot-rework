@@ -1,0 +1,22 @@
+{
+  "name": "roamfree",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/mobile",
+    "packages/shared"
+  ],
+  "scripts": {
+    "mobile": "yarn workspace @roamfree/mobile start",
+    "mobile:ios": "yarn workspace @roamfree/mobile ios",
+    "mobile:android": "yarn workspace @roamfree/mobile android",
+    "type-check": "yarn workspaces run type-check"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "yarn": ">=1.22.0"
+  }
+}

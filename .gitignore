@@ -1,0 +1,36 @@
+node_modules/
+.expo/
+dist/
+build/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Expo
+ios/
+android/
+web-build/
+expo-env.d.ts
+
+# Supabase
+.supabase/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Coverage
+coverage/

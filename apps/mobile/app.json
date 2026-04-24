@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "RoamFree",
+    "slug": "roamfree",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "roamfree",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a6b3a"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.roamfree.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "RoamFree needs your location to show your position on the map and record your activities.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "RoamFree needs your location in the background to continue recording your activity.",
+        "NSLocationAlwaysUsageDescription": "RoamFree needs your location in the background to continue recording your activity.",
+        "NSBluetoothAlwaysUsageDescription": "RoamFree uses Bluetooth to connect to heart rate monitors and other sensors.",
+        "UIBackgroundModes": ["location"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a6b3a"
+      },
+      "package": "com.roamfree.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow RoamFree to use your location for activity recording and navigation."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
