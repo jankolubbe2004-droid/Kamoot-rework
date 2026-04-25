@@ -6,7 +6,7 @@ import { useAuthStore } from '../stores/authStore';
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const { initialize, session, isLoading } = useAuthStore();
+  const { initialize, session, isLoading, isNewUser } = useAuthStore();
 
   useEffect(() => {
     initialize();
@@ -18,8 +18,17 @@ export default function RootLayout() {
 
     if (!session) {
       router.replace('/auth/login');
+      return;
     }
-  }, [isLoading, session]);
+
+    // New user immediately after signup → finish profile before entering tabs
+    if (isNewUser) {
+      router.replace('/auth/profile-setup');
+      return;
+    }
+
+    router.replace('/(tabs)/discover');
+  }, [isLoading, session, isNewUser]);
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -27,7 +36,14 @@ export default function RootLayout() {
       <Stack.Screen name="auth" />
       <Stack.Screen
         name="route/[id]"
-        options={{ headerShown: true, title: 'Route Details', presentation: 'card' }}
+        options={{
+          headerShown: true,
+          title: 'Route Details',
+          presentation: 'card',
+          headerStyle: { backgroundColor: '#030712' },
+          headerTintColor: '#4ade80',
+          headerTitleStyle: { color: '#ffffff' },
+        }}
       />
     </Stack>
   );
