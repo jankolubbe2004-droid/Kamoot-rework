@@ -86,3 +86,52 @@ export function formatDuration(ms: number): string {
 export function formatElevation(meters: number): string {
   return `${Math.round(meters)} m`;
 }
+
+export interface ElevationPoint {
+  distanceM: number;
+  elevationM: number;
+}
+
+export function generateElevationProfile(
+  waypoints: { lat: number; lng: number; ele?: number }[],
+  samplesPerSegment = 10
+): ElevationPoint[] {
+  if (waypoints.length < 2) return [];
+
+  const points: ElevationPoint[] = [];
+  let totalDist = 0;
+
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const a = waypoints[i];
+    const b = waypoints[i + 1];
+    const segDist = calculateDistanceM(a.lat, a.lng, b.lat, b.lng);
+    const baseA = a.ele ?? 150 + deterministicNoise(a.lat, a.lng) * 100;
+    const baseB = b.ele ?? 150 + deterministicNoise(b.lat, b.lng) * 100;
+
+    for (let s = 0; s < samplesPerSegment; s++) {
+      const t = s / samplesPerSegment;
+      const lat = a.lat + (b.lat - a.lat) * t;
+      const lng = a.lng + (b.lng - a.lng) * t;
+      const noise = deterministicNoise(lat * 17.3 + s, lng * 13.7 + s) * 15;
+      points.push({
+        distanceM: totalDist + segDist * t,
+        elevationM: baseA + (baseB - baseA) * t + noise,
+      });
+    }
+
+    totalDist += segDist;
+  }
+
+  // Final point
+  const last = waypoints[waypoints.length - 1];
+  points.push({
+    distanceM: totalDist,
+    elevationM: last.ele ?? 150 + deterministicNoise(last.lat, last.lng) * 100,
+  });
+
+  return points;
+}
+
+function deterministicNoise(x: number, y: number): number {
+  return Math.sin(x * 317.3 + y * 193.7) * 0.5 + Math.sin(x * 53.1 + y * 79.4) * 0.5;
+}
