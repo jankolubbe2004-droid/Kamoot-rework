@@ -1,4 +1,5 @@
 import '../global.css';
+import { StripeProvider } from '@stripe/stripe-react-native';
 import { SplashScreen, Stack, router } from 'expo-router';
 import { useEffect } from 'react';
 import { useAuthStore } from '../stores/authStore';
@@ -31,20 +32,23 @@ export default function RootLayout() {
   }, [isLoading, session, isNewUser]);
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="auth" />
-      <Stack.Screen
-        name="route/[id]"
-        options={{
-          headerShown: true,
-          title: 'Route Details',
-          presentation: 'card',
-          headerStyle: { backgroundColor: '#030712' },
-          headerTintColor: '#4ade80',
-          headerTitleStyle: { color: '#ffffff' },
-        }}
-      />
-    </Stack>
+    <StripeProvider publishableKey={process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? ''}>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="auth" />
+        <Stack.Screen name="profile" />
+        <Stack.Screen
+          name="route/[id]"
+          options={{
+            headerShown: true,
+            title: 'Route Details',
+            presentation: 'card',
+            headerStyle: { backgroundColor: '#030712' },
+            headerTintColor: '#4ade80',
+            headerTitleStyle: { color: '#ffffff' },
+          }}
+        />
+      </Stack>
+    </StripeProvider>
   );
 }

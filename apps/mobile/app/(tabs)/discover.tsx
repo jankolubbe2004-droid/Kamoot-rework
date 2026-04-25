@@ -8,6 +8,7 @@ import { RouteCard } from '../../components/Route/RouteCard';
 import { BottomSheet } from '../../components/ui/BottomSheet';
 import { Loading } from '../../components/ui/Loading';
 import { ErrorMessage } from '../../components/ui/ErrorMessage';
+import { usePlan } from '../../hooks/usePlan';
 import { useRouteStore } from '../../stores/routeStore';
 import type { Route, SportType } from '../../types';
 
@@ -24,6 +25,7 @@ type SheetSnap = 'peek' | 'half' | 'full';
 
 export default function DiscoverScreen() {
   const { publicRoutes, isLoadingPublic, publicError, fetchPublicRoutes } = useRouteStore();
+  const { isPremium } = usePlan();
   const mapRef = useRef<RoamMapRef>(null);
 
   const [query, setQuery]             = useState('');
@@ -151,6 +153,9 @@ export default function DiscoverScreen() {
           </Text>
         </View>
 
+        {/* Offline maps upgrade prompt */}
+        <OfflineMapsBanner isPremium={isPremium} />
+
         {publicError ? (
           <View className="px-4">
             <ErrorMessage message={publicError} onRetry={handleRefresh} />
@@ -192,5 +197,48 @@ export default function DiscoverScreen() {
         )}
       </BottomSheet>
     </View>
+  );
+}
+
+function OfflineMapsBanner({ isPremium }: { isPremium: boolean }) {
+  return (
+    <Pressable
+      onPress={() => {
+        if (!isPremium) {
+          router.push('/profile/upgrade');
+        }
+        // Premium users: future offline map download UI goes here
+      }}
+      style={{
+        marginHorizontal: 16,
+        marginBottom: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: isPremium ? '#bbf7d0' : '#e5e7eb',
+        backgroundColor: isPremium ? '#f0fdf4' : '#fafafa',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        gap: 10,
+      }}
+    >
+      <Text style={{ fontSize: 22 }}>🗺️</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: '#111827' }}>
+          {isPremium ? 'Offline Maps' : 'Download maps for offline use'}
+        </Text>
+        <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 1 }}>
+          {isPremium
+            ? 'Explorer plan active — tap to manage downloads'
+            : 'Available on Explorer & Lifetime plans'}
+        </Text>
+      </View>
+      {!isPremium && (
+        <View style={{ backgroundColor: '#16a34a', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Unlock</Text>
+        </View>
+      )}
+    </Pressable>
   );
 }

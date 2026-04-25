@@ -48,6 +48,23 @@ serve(async (req) => {
         }
         break;
       }
+      case 'checkout.session.completed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const userId = session.metadata?.user_id;
+        const plan   = session.metadata?.plan as 'explorer' | 'lifetime' | undefined;
+        if (!userId || !plan) break;
+        if (plan === 'lifetime') {
+          await upgradeToLifetime(userId);
+        } else if (plan === 'explorer') {
+          // Subscription period info is set later via subscription.updated;
+          // set plan active now so the user isn't left waiting.
+          await supabase
+            .from('profiles')
+            .update({ plan: 'explorer', plan_expires_at: null })
+            .eq('id', userId);
+        }
+        break;
+      }
     }
 
     return new Response(JSON.stringify({ received: true }), {

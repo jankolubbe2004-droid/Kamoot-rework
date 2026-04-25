@@ -131,10 +131,10 @@ export default function ProfileScreen() {
                   variant="secondary"
                   fullWidth
                 />
-                {profile.plan === 'free' && (
+                {profile.plan !== 'lifetime' && (
                   <Button
-                    label="✨ Upgrade to Explorer — $1.99/mo"
-                    onPress={() => Alert.alert('Coming soon', 'Payments launching soon!')}
+                    label={profile.plan === 'free' ? '✨ Upgrade to Explorer — $1.99/mo' : '✨ View plans'}
+                    onPress={() => router.push('/profile/upgrade')}
                     variant="ghost"
                     fullWidth
                   />
