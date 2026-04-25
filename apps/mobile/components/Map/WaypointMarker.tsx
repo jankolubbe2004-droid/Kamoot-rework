@@ -5,9 +5,11 @@ import type { Waypoint } from '../../types';
 interface WaypointMarkersProps {
   waypoints: Waypoint[];
   onMarkerPress?: (index: number) => void;
+  /** Set false when a calculated route polyline is already drawn — avoids duplicate lines. */
+  showPolyline?: boolean;
 }
 
-export function WaypointMarkers({ waypoints, onMarkerPress }: WaypointMarkersProps) {
+export function WaypointMarkers({ waypoints, onMarkerPress, showPolyline = true }: WaypointMarkersProps) {
   if (waypoints.length === 0) return null;
 
   return (
@@ -24,7 +26,7 @@ export function WaypointMarkers({ waypoints, onMarkerPress }: WaypointMarkersPro
         </MapLibreGL.PointAnnotation>
       ))}
 
-      {waypoints.length >= 2 && (
+      {showPolyline && waypoints.length >= 2 && (
         <RoutePolyline waypoints={waypoints} />
       )}
     </>

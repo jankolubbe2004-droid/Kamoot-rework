@@ -1,10 +1,13 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
+  Switch,
   Text,
   TextInput,
   View,
@@ -12,298 +15,458 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RoamMap, type RoamMapRef } from '../../components/Map/RoamMap';
 import { WaypointMarkers } from '../../components/Map/WaypointMarker';
+import { TrackPolyline } from '../../components/Map/TrackPolyline';
 import { WaypointList } from '../../components/Route/WaypointList';
-import { Button } from '../../components/ui/Button';
 import { useRouteStore } from '../../stores/routeStore';
+import { shareGpxFile, generateFIT, shareFitFile } from '../../lib/gpx';
 import type { Difficulty, SportType } from '../../types';
-import { useRef } from 'react';
 
-const SPORT_OPTIONS: { label: string; value: SportType }[] = [
-  { label: '🥾 Hiking', value: 'hiking' },
-  { label: '🚴 Cycling', value: 'cycling' },
-  { label: '🏃 Running', value: 'trail_running' },
-  { label: '🚵 MTB', value: 'mountain_biking' },
-  { label: '🚶 Walking', value: 'walking' },
+const SPORT_OPTIONS: { label: string; value: SportType; color: string }[] = [
+  { label: '🥾 Hiking',   value: 'hiking',          color: '#16a34a' },
+  { label: '🚴 Cycling',  value: 'cycling',          color: '#0ea5e9' },
+  { label: '🏃 Running',  value: 'trail_running',    color: '#f97316' },
+  { label: '🚵 MTB',      value: 'mountain_biking',  color: '#92400e' },
+  { label: '🚶 Walking',  value: 'walking',          color: '#8b5cf6' },
 ];
 
 const DIFFICULTY_OPTIONS: { label: string; value: Difficulty }[] = [
-  { label: 'Easy', value: 'easy' },
+  { label: 'Easy',     value: 'easy'     },
   { label: 'Moderate', value: 'moderate' },
-  { label: 'Hard', value: 'hard' },
-  { label: 'Expert', value: 'expert' },
+  { label: 'Hard',     value: 'hard'     },
+  { label: 'Expert',   value: 'expert'   },
 ];
 
-type PanelTab = 'map' | 'details';
+const SPORT_COLOR: Record<SportType, string> = {
+  hiking:          '#16a34a',
+  cycling:         '#0ea5e9',
+  trail_running:   '#f97316',
+  mountain_biking: '#92400e',
+  walking:         '#8b5cf6',
+};
 
 export default function RouteScreen() {
   const mapRef = useRef<RoamMapRef>(null);
-  const [activeTab, setActiveTab] = useState<PanelTab>('map');
   const [isPublic, setIsPublic] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
   const {
-    draftTitle,
-    draftDescription,
-    draftSportType,
-    draftDifficulty,
-    draftWaypoints,
-    isSaving,
-    saveError,
-    setDraftTitle,
-    setDraftDescription,
-    setDraftSportType,
-    setDraftDifficulty,
-    addWaypoint,
-    removeWaypoint,
-    saveRoute,
-    resetDraft,
-    exportRouteGpx,
+    draftTitle, draftDescription, draftSportType, draftDifficulty,
+    draftWaypoints, isSaving, saveError,
+    calculatedRoute, isCalculating, calcError,
+    setDraftTitle, setDraftDescription, setDraftSportType, setDraftDifficulty,
+    addWaypoint, removeWaypoint, updateWaypoint,
+    triggerCalculation, saveRoute, resetDraft,
+    exportDraftGpx, exportDraftFitPoints,
   } = useRouteStore();
 
-  const handleMapLongPress = (lat: number, lng: number) => {
+  // Auto-calculate whenever waypoints or sport type change
+  useEffect(() => {
+    if (draftWaypoints.length >= 2) triggerCalculation();
+  }, [draftWaypoints.length, draftSportType]);
+
+  const handleMapTap = (lat: number, lng: number) => {
     addWaypoint({ lat, lng });
   };
 
+  const handleRemoveWaypoint = (index: number) => {
+    removeWaypoint(index);
+  };
+
+  const handleFlyTo = (index: number) => {
+    const wp = draftWaypoints[index];
+    if (wp) mapRef.current?.flyTo(wp.lng, wp.lat);
+  };
+
+  const handleSportChange = (sport: SportType) => {
+    setDraftSportType(sport);
+    // triggerCalculation fires via useEffect
+  };
+
+  // ── Save ─────────────────────────────────────────────────────────────────────
+
   const handleSave = async () => {
     if (!draftTitle.trim()) {
-      Alert.alert('Title required', 'Please enter a route title before saving.');
-      setActiveTab('details');
+      Alert.alert('Title required', 'Give your route a name before saving.');
       return;
     }
     if (draftWaypoints.length < 2) {
-      Alert.alert('Waypoints needed', 'Add at least 2 waypoints by long-pressing the map.');
-      setActiveTab('map');
+      Alert.alert('Add waypoints', 'Tap the map to add at least 2 waypoints.');
       return;
     }
     try {
       const saved = await saveRoute(isPublic);
-      Alert.alert('Route saved!', isPublic ? 'Your route is now public.' : 'Route saved privately.', [
-        {
-          text: 'View Route',
-          onPress: () => router.push(`/route/${saved.id}`),
-        },
-        { text: 'New Route', onPress: resetDraft },
-      ]);
+      Alert.alert(
+        'Route saved!',
+        isPublic ? 'Your route is now public.' : 'Saved as private.',
+        [
+          { text: 'View route', onPress: () => router.push(`/route/${saved.id}`) },
+          { text: 'New route',  onPress: resetDraft },
+        ],
+      );
     } catch (err) {
       Alert.alert('Save failed', err instanceof Error ? err.message : 'Unknown error');
     }
   };
 
-  const handleExportGpx = () => {
-    if (draftWaypoints.length < 2) {
-      Alert.alert('Nothing to export', 'Add at least 2 waypoints first.');
+  // ── Export GPX ───────────────────────────────────────────────────────────────
+
+  const handleExportGpx = async () => {
+    if (draftWaypoints.length < 1) {
+      Alert.alert('Nothing to export', 'Add at least one waypoint first.');
       return;
     }
-    const fakeRoute = {
-      id: 'draft',
-      user_id: '',
-      title: draftTitle || 'My Route',
-      description: draftDescription || null,
-      sport_type: draftSportType,
-      difficulty: draftDifficulty,
-      distance_m: 0,
-      elevation_gain_m: 0,
-      gpx_url: null,
-      is_public: false,
-      waypoints: draftWaypoints,
-      created_at: new Date().toISOString(),
-    };
-    const gpx = exportRouteGpx(fakeRoute);
-    import('../../lib/gpx').then(({ shareGpxFile }) => {
-      shareGpxFile(draftTitle || 'route', gpx).catch((e) =>
-        Alert.alert('Export failed', e.message)
-      );
-    });
+    try {
+      const gpx = exportDraftGpx();
+      await shareGpxFile(draftTitle || 'route', gpx);
+    } catch (err) {
+      Alert.alert('Export failed', err instanceof Error ? err.message : 'Unknown error');
+    }
   };
 
+  // ── Sync to Device (FIT) ─────────────────────────────────────────────────────
+
+  const handleSyncToDevice = async () => {
+    if (draftWaypoints.length < 2) {
+      Alert.alert('Add waypoints', 'You need at least 2 waypoints to export a course.');
+      return;
+    }
+    try {
+      const points = exportDraftFitPoints();
+      const distM  = calculatedRoute?.distance_m ?? 0;
+      const fit    = generateFIT(draftTitle || 'Route', points, draftSportType, distM);
+      await shareFitFile(draftTitle || 'route', fit);
+    } catch (err) {
+      Alert.alert('FIT export failed', err instanceof Error ? err.message : 'Unknown error');
+    }
+  };
+
+  // ── Derived display values ────────────────────────────────────────────────────
+
+  const distKm  = calculatedRoute ? (calculatedRoute.distance_m / 1000).toFixed(1) : '—';
+  const elevM   = calculatedRoute ? Math.round(calculatedRoute.elevation_gain_m) : '—';
+  const durMin  = calculatedRoute ? Math.round(calculatedRoute.duration_ms / 60000) : null;
+  const durStr  = durMin != null
+    ? durMin >= 60
+      ? `${Math.floor(durMin / 60)}h ${durMin % 60}min`
+      : `${durMin} min`
+    : '—';
+
+  const routeColor  = SPORT_COLOR[draftSportType] ?? '#16a34a';
+  const hasCalcRoute = !!calculatedRoute && calculatedRoute.points.length >= 2;
+
   return (
-    <SafeAreaView className="flex-1 bg-white" edges={['top']}>
-      <View className="flex-1">
-        {/* Header */}
-        <View className="px-4 pt-4 pb-3 flex-row items-center justify-between">
-          <Text className="text-2xl font-bold text-gray-900">Plan Route</Text>
-          <View className="flex-row gap-x-2">
-            <Button label="Export GPX" onPress={handleExportGpx} variant="secondary" size="sm" />
-            <Button
-              label={isSaving ? 'Saving…' : 'Save'}
-              onPress={handleSave}
-              isLoading={isSaving}
-              size="sm"
+    <View style={{ flex: 1, backgroundColor: '#fff' }}>
+      {/* ── Full-screen map ───────────────────────────────────────────────── */}
+      <View style={{ flex: 1 }}>
+        <RoamMap ref={mapRef} onPress={handleMapTap}>
+          {/* GH-calculated polyline replaces the straight connector */}
+          {hasCalcRoute && (
+            <TrackPolyline
+              points={calculatedRoute.points}
+              color={routeColor}
+              width={4}
             />
-          </View>
-        </View>
+          )}
 
-        {/* Tab switcher */}
-        <View className="flex-row px-4 mb-3 gap-x-2">
-          <TabButton label="🗺️ Map" isActive={activeTab === 'map'} onPress={() => setActiveTab('map')} />
-          <TabButton label="✏️ Details" isActive={activeTab === 'details'} onPress={() => setActiveTab('details')} />
-        </View>
+          {/* Waypoint pins; suppress built-in straight polyline when GH result is present */}
+          <WaypointMarkers
+            waypoints={draftWaypoints}
+            showPolyline={!hasCalcRoute}
+            onMarkerPress={handleFlyTo}
+          />
+        </RoamMap>
 
-        {activeTab === 'map' ? (
-          <View className="flex-1">
-            <RoamMap ref={mapRef} onLongPress={handleMapLongPress}>
-              <WaypointMarkers waypoints={draftWaypoints} />
-            </RoamMap>
-
-            {/* Floating waypoint count */}
-            <View className="absolute bottom-4 left-4 right-4 bg-white rounded-2xl shadow-lg p-3">
-              <Text className="text-xs text-gray-500 mb-1">
-                {draftWaypoints.length === 0
-                  ? 'Long-press the map to add waypoints'
-                  : `${draftWaypoints.length} waypoint${draftWaypoints.length !== 1 ? 's' : ''} added`}
-              </Text>
-              <WaypointList
-                waypoints={draftWaypoints}
-                onRemove={removeWaypoint}
-                onPress={(i) => {
-                  const wp = draftWaypoints[i];
-                  mapRef.current?.flyTo(wp.lng, wp.lat);
-                }}
-              />
+        {/* Tap-to-add hint */}
+        {draftWaypoints.length === 0 && (
+          <View
+            style={{
+              position: 'absolute', top: 60, left: 0, right: 0,
+              alignItems: 'center', pointerEvents: 'none',
+            }}
+          >
+            <View
+              style={{
+                backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 20,
+                paddingHorizontal: 16, paddingVertical: 8,
+              }}
+            >
+              <Text style={{ color: '#fff', fontSize: 13 }}>Tap the map to add a start point</Text>
             </View>
           </View>
-        ) : (
-          <KeyboardAvoidingView
-            className="flex-1"
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        )}
+
+        {/* Undo/clear floating buttons */}
+        {draftWaypoints.length > 0 && (
+          <View
+            style={{
+              position: 'absolute', top: 12, right: 12,
+              gap: 8, flexDirection: 'column',
+            }}
           >
-            <ScrollView className="flex-1 px-4" keyboardShouldPersistTaps="handled">
-              <View className="gap-y-5 pb-8">
-                {saveError && (
-                  <View className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-                    <Text className="text-sm text-red-700">{saveError}</Text>
-                  </View>
-                )}
-
-                <View className="gap-y-1">
-                  <Text className="text-sm font-medium text-gray-700">Title</Text>
-                  <TextInput
-                    className="border border-gray-300 rounded-xl px-4 py-3 text-base text-gray-900 bg-white"
-                    placeholder="My awesome route"
-                    placeholderTextColor="#9ca3af"
-                    value={draftTitle}
-                    onChangeText={setDraftTitle}
-                    maxLength={80}
-                  />
-                </View>
-
-                <View className="gap-y-1">
-                  <Text className="text-sm font-medium text-gray-700">Description (optional)</Text>
-                  <TextInput
-                    className="border border-gray-300 rounded-xl px-4 py-3 text-base text-gray-900 bg-white"
-                    placeholder="Describe the route, highlights, tips..."
-                    placeholderTextColor="#9ca3af"
-                    value={draftDescription}
-                    onChangeText={setDraftDescription}
-                    multiline
-                    numberOfLines={3}
-                    textAlignVertical="top"
-                    maxLength={500}
-                  />
-                </View>
-
-                <SelectorGroup
-                  label="Activity type"
-                  options={SPORT_OPTIONS}
-                  selected={draftSportType}
-                  onSelect={(v) => setDraftSportType(v as SportType)}
-                />
-
-                <SelectorGroup
-                  label="Difficulty"
-                  options={DIFFICULTY_OPTIONS}
-                  selected={draftDifficulty}
-                  onSelect={(v) => setDraftDifficulty(v as Difficulty)}
-                />
-
-                <View className="flex-row items-center justify-between py-3 border-t border-gray-100">
-                  <View>
-                    <Text className="text-sm font-medium text-gray-800">Share publicly</Text>
-                    <Text className="text-xs text-gray-400">Others can discover this route</Text>
-                  </View>
-                  <View
-                    onTouchEnd={() => setIsPublic(!isPublic)}
-                    className={[
-                      'w-12 h-6 rounded-full',
-                      isPublic ? 'bg-brand-600' : 'bg-gray-300',
-                    ].join(' ')}
-                  >
-                    <View
-                      className={[
-                        'w-5 h-5 bg-white rounded-full shadow mt-0.5 transition-all',
-                        isPublic ? 'ml-6' : 'ml-0.5',
-                      ].join(' ')}
-                    />
-                  </View>
-                </View>
-              </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
+            <Pressable
+              onPress={() => removeWaypoint(draftWaypoints.length - 1)}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 20,
+                paddingHorizontal: 12, paddingVertical: 6, elevation: 4,
+                shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.15, shadowRadius: 4,
+              }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151' }}>↩ Undo</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                Alert.alert('Clear waypoints?', 'This removes all waypoints.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Clear', style: 'destructive', onPress: resetDraft },
+                ]);
+              }}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.92)', borderRadius: 20,
+                paddingHorizontal: 12, paddingVertical: 6, elevation: 4,
+                shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.15, shadowRadius: 4,
+              }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '600', color: '#ef4444' }}>✕ Clear</Text>
+            </Pressable>
+          </View>
         )}
       </View>
-    </SafeAreaView>
+
+      {/* ── Bottom panel ──────────────────────────────────────────────────── */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <SafeAreaView edges={['bottom']} style={{ backgroundColor: '#fff' }}>
+          <View
+            style={{
+              borderTopWidth: 1, borderTopColor: '#f3f4f6',
+              shadowColor: '#000', shadowOffset: { width: 0, height: -2 },
+              shadowOpacity: 0.06, shadowRadius: 8, elevation: 12,
+            }}
+          >
+            {/* Stats row */}
+            <View
+              style={{
+                flexDirection: 'row', alignItems: 'center',
+                paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8,
+                gap: 0,
+              }}
+            >
+              <StatCell label="Distance" value={`${distKm} km`} />
+              <Divider />
+              <StatCell label="Elevation" value={`↑ ${elevM} m`} />
+              <Divider />
+              <StatCell label="Est. time" value={durStr} />
+              {isCalculating && (
+                <ActivityIndicator size="small" color={routeColor} style={{ marginLeft: 8 }} />
+              )}
+              {calcError && !isCalculating && (
+                <Text style={{ fontSize: 10, color: '#f97316', marginLeft: 8, flex: 1 }} numberOfLines={1}>
+                  ⚠ Offline — straight lines shown
+                </Text>
+              )}
+            </View>
+
+            {/* Sport type selector */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 8, gap: 6 }}
+            >
+              {SPORT_OPTIONS.map((opt) => {
+                const active = draftSportType === opt.value;
+                return (
+                  <Pressable
+                    key={opt.value}
+                    onPress={() => handleSportChange(opt.value)}
+                    style={{
+                      paddingHorizontal: 12, paddingVertical: 6,
+                      borderRadius: 20, borderWidth: 1.5,
+                      borderColor: active ? opt.color : '#e5e7eb',
+                      backgroundColor: active ? opt.color + '18' : '#fff',
+                    }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: active ? opt.color : '#6b7280' }}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            {/* Title input */}
+            <View style={{ paddingHorizontal: 16, paddingBottom: 6 }}>
+              <TextInput
+                style={{
+                  borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12,
+                  paddingHorizontal: 12, paddingVertical: 8,
+                  fontSize: 14, color: '#111827', backgroundColor: '#f9fafb',
+                }}
+                placeholder="Route name (tap to edit)"
+                placeholderTextColor="#9ca3af"
+                value={draftTitle}
+                onChangeText={setDraftTitle}
+                maxLength={80}
+                returnKeyType="done"
+              />
+            </View>
+
+            {/* Waypoint list */}
+            <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
+              <WaypointList
+                waypoints={draftWaypoints}
+                onRemove={handleRemoveWaypoint}
+                onPress={handleFlyTo}
+                onUpdateTitle={(i, t) => updateWaypoint(i, { title: t ?? undefined })}
+                maxHeight={140}
+              />
+            </View>
+
+            {/* Expandable details section */}
+            <Pressable
+              onPress={() => setShowDetails((v) => !v)}
+              style={{ paddingHorizontal: 16, paddingBottom: 4 }}
+            >
+              <Text style={{ fontSize: 12, color: '#6b7280', fontWeight: '500' }}>
+                {showDetails ? '▲ Hide details' : '▼ Description, difficulty, visibility'}
+              </Text>
+            </Pressable>
+
+            {showDetails && (
+              <View style={{ paddingHorizontal: 16, gap: 10, paddingBottom: 8 }}>
+                <TextInput
+                  style={{
+                    borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12,
+                    paddingHorizontal: 12, paddingVertical: 8,
+                    fontSize: 13, color: '#374151', backgroundColor: '#f9fafb',
+                    minHeight: 60, textAlignVertical: 'top',
+                  }}
+                  placeholder="Description (optional)"
+                  placeholderTextColor="#9ca3af"
+                  value={draftDescription}
+                  onChangeText={setDraftDescription}
+                  multiline
+                  maxLength={500}
+                />
+
+                {/* Difficulty selector */}
+                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                  {DIFFICULTY_OPTIONS.map((opt) => {
+                    const active = draftDifficulty === opt.value;
+                    return (
+                      <Pressable
+                        key={opt.value}
+                        onPress={() => setDraftDifficulty(opt.value)}
+                        style={{
+                          paddingHorizontal: 12, paddingVertical: 5, borderRadius: 16,
+                          borderWidth: 1,
+                          borderColor: active ? '#16a34a' : '#e5e7eb',
+                          backgroundColor: active ? '#f0fdf4' : '#fff',
+                        }}
+                      >
+                        <Text style={{ fontSize: 13, fontWeight: '500', color: active ? '#16a34a' : '#6b7280' }}>
+                          {opt.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {/* Public toggle */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <View>
+                    <Text style={{ fontSize: 13, fontWeight: '500', color: '#374151' }}>Share publicly</Text>
+                    <Text style={{ fontSize: 11, color: '#9ca3af' }}>Others can discover this route</Text>
+                  </View>
+                  <Switch
+                    value={isPublic}
+                    onValueChange={setIsPublic}
+                    trackColor={{ false: '#d1d5db', true: '#16a34a' }}
+                    thumbColor="#fff"
+                  />
+                </View>
+
+                {saveError && (
+                  <Text style={{ fontSize: 12, color: '#ef4444' }}>{saveError}</Text>
+                )}
+              </View>
+            )}
+
+            {/* Action buttons */}
+            <View
+              style={{
+                flexDirection: 'row', paddingHorizontal: 12,
+                paddingTop: 6, paddingBottom: 10, gap: 8,
+              }}
+            >
+              <ActionButton
+                label={isSaving ? 'Saving…' : '💾 Save Route'}
+                onPress={handleSave}
+                disabled={isSaving}
+                primary
+              />
+              <ActionButton label="📤 GPX" onPress={handleExportGpx} />
+              <ActionButton label="⌚ Sync" onPress={handleSyncToDevice} />
+            </View>
+          </View>
+        </SafeAreaView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
-function TabButton({
+// ── Local sub-components ──────────────────────────────────────────────────────
+
+function StatCell({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={{ flex: 1, alignItems: 'center' }}>
+      <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827' }}>{value}</Text>
+      <Text style={{ fontSize: 10, color: '#9ca3af', marginTop: 1 }}>{label}</Text>
+    </View>
+  );
+}
+
+function Divider() {
+  return <View style={{ width: 1, height: 28, backgroundColor: '#f3f4f6' }} />;
+}
+
+function ActionButton({
   label,
-  isActive,
   onPress,
+  primary = false,
+  disabled = false,
 }: {
   label: string;
-  isActive: boolean;
   onPress: () => void;
+  primary?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <View
-      onTouchEnd={onPress}
-      className={[
-        'flex-1 py-2 rounded-xl items-center',
-        isActive ? 'bg-brand-600' : 'bg-gray-100',
-      ].join(' ')}
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => ({
+        flex: primary ? 2 : 1,
+        paddingVertical: 11,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: primary
+          ? disabled ? '#d1fae5' : '#16a34a'
+          : '#f3f4f6',
+        opacity: pressed ? 0.75 : 1,
+      })}
     >
-      <Text className={`text-sm font-semibold ${isActive ? 'text-white' : 'text-gray-600'}`}>
+      <Text
+        style={{
+          fontSize: 13,
+          fontWeight: '700',
+          color: primary ? '#fff' : '#374151',
+        }}
+        numberOfLines={1}
+      >
         {label}
       </Text>
-    </View>
-  );
-}
-
-function SelectorGroup<T extends string>({
-  label,
-  options,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  options: { label: string; value: T }[];
-  selected: T;
-  onSelect: (v: T) => void;
-}) {
-  return (
-    <View className="gap-y-2">
-      <Text className="text-sm font-medium text-gray-700">{label}</Text>
-      <View className="flex-row flex-wrap gap-2">
-        {options.map((opt) => (
-          <View
-            key={opt.value}
-            onTouchEnd={() => onSelect(opt.value)}
-            className={[
-              'px-3 py-2 rounded-xl border',
-              selected === opt.value
-                ? 'bg-brand-600 border-brand-600'
-                : 'bg-white border-gray-200',
-            ].join(' ')}
-          >
-            <Text
-              className={`text-sm font-medium ${
-                selected === opt.value ? 'text-white' : 'text-gray-700'
-              }`}
-            >
-              {opt.label}
-            </Text>
-          </View>
-        ))}
-      </View>
-    </View>
+    </Pressable>
   );
 }
